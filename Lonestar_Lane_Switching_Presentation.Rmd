@@ -1,0 +1,424 @@
+---
+title: "Lonestar Lane Switching"
+author: "Pete Castillo"
+date: "2023-11-27"
+output: slidy_presentation
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE)
+```
+
+
+```{r dataload, echo=FALSE}
+library(tidyverse)
+all_accident_data <- read_csv('US_Accidents_March23 3.csv')
+tx_only_data <- filter(all_accident_data, State == "TX")
+
+tx_only_data$Start_Time <- as.POSIXct(tx_only_data$Start_Time, format="%Y-%m-%d %H:%M:%S")
+tx_only_data$End_Time <- as.POSIXct(tx_only_data$End_Time, format="%Y-%m-%d %H:%M:%S")
+
+tx_only_data$Year <- format(tx_only_data$Start_Time, "%Y")
+
+```
+## Lonestar Lane Switching
+
+A brief look at accident data in Texas.
+
+
+## Introduction
+
+I found this dataset on Kaggle here: [https://www.kaggle.com/datasets/sobhanmoosavi/us-accidents]. This dataset contains accident information for the entire United States from February 2016 to March 2023. 
+- The original  dataset was very large
+- Decided to only  look at Texas accident data
+
+## Questions 
+* Which areas in Texas have a higher amount of accidents?
+  + Counties?
+  + Cities?
+
+* Have accidents in Texas increased or decreased throughout the years?
+* Are there any weather  conditions that affect the amount of accidents
+* Are there any particular hours when more accidents occur?
+
+## Libaries used
+
+* libaray(tidyverse) - used to tidy and manipulate data
+* library(ggplot) - for visualizations
+* library(maps) - really cool package for maps/geographical data
+
+
+## Quick look  at the data
+```{r quick-look, echo=FALSE}
+colnames(tx_only_data)
+```
+## Definitions 
+
+* Start_Time & End_Time
+  + Start_Time - Shows start time of the accident in local time zone.
+  + End_Time - Shows end time of the accident in local time zone. End time here refers to when the impact of accident on traffic flow.
+  
+* Start_Lat, Start_Lat - Shows longitude and latitude in GPS coordinate of the start point.
+
+* Severity - Shows the severity of the accident, a number between 1 and 4, where 1 indicates the least impact on traffic.
+
+## Some formatting
+
+* The Start_Time values are all in the following format:
+```{r start_time_ex, echo=FALSE}
+tx_only_data$Start_Time[1]
+```
+* I used the as.POSIXct function to format the Start_Time values to extract specific date and time values from the data which will be useful later on. 
+
+## Texas accidents by Year
+```{r yeartable, echo=FALSE,fig.show="hold", out.width="50%"}
+accidents_by_year_ranked <- tx_only_data %>% 
+  group_by(Year) %>% 
+  summarise(Accidents = n()) %>% 
+  arrange(desc(Accidents))
+accidents_by_year_ranked
+
+ggplot(accidents_by_year_ranked, aes(x = Year, y = Accidents, fill = Year)) + 
+  geom_bar(stat = "identity") +
+  xlab("Year") + 
+  ylab("Accidents") + 
+  ggtitle("Accidents in Texas by year")
+```
+
+
+
+* Good information but data collection starts February 2016 and ends March 2023
+* What if I tried to predict accidents in 2023?
+
+## Projecting 2023 accidents
+```{r completeyears, echo=FALSE}
+not_including_partial_years <- accidents_by_year_ranked %>% 
+  filter(!Year %in% c("2016", "2023")) #removing 2016 and 2023 years 
+not_including_partial_years
+```
+* Added the values in 'Accidents' column for years 2017-2022 
+* Number of  rows = number of years in dataset
+```{r}
+total_accidents_full <- sum(not_including_partial_years$Accidents) #adding  accidents from 2017-2022
+number_of_years <- nrow(not_including_partial_years)
+```
+* Divided the sum of the total accidents by the amount of years.
+```{r}
+yearly_average <- total_accidents_full/number_of_years #total number of accidents from 2017-2023 divided by the number of years
+yearly_average
+
+```
+
+* Calculated monthly rate
+```{r}
+monthly_rate <- not_including_partial_years %>% #years 2017-2022
+  mutate(MonthlyAccidents = Accidents / 12) %>%  #test
+  summarise(AverageMonthlyRate = mean(MonthlyAccidents)) #mean of monthly rate
+monthly_rate
+```
+* Then average monthly rate
+```{r}
+average_monthly_rate <- monthly_rate$AverageMonthlyRate
+average_monthly_rate
+```
+* Adding reported  2023 accidents until March to estimated amount for the rest of 2023
+```{r}
+accidents_until_march <- 13824 #amount of accidents reported until March  2023
+estimated_accidents_rest_of_2023 <- average_monthly_rate * (12 - 3) #multiplying average monthly rate by amount of months remaining 
+
+total_estimated_accidents_2023 <- accidents_until_march + estimated_accidents_rest_of_2023 #adding amount of accidents reported until march 2023 to the estimated amount for the rest of 2023
+total_estimated_accidents_2023
+```
+* Silver Lining - if my projection is correct Texans should experience less accidents this year
+* Will be curious to come back and cross check my projection when real data is updated next year
+
+```{r echo=FALSE}
+accidents_with_2023_projection <- rbind(not_including_partial_years, data.frame(Year = "2023", Accidents = total_estimated_accidents_2023))
+
+ggplot(accidents_with_2023_projection, aes(x = Year, y = Accidents, group = 1)) +
+  geom_line() +
+  geom_point() +
+  labs(title = "Projected Total Accidents for 2023", x = "Year", y = "Number of Accidents")
+```
+
+
+## Accidents by County
+* I decided to try and break down this data to observe which counties have a higher density of accidents within those counties.
+* Since there are a total of 254 counties within this massive state, I decided to focus on the top 10 counties with the most accidents.
+* To no surprise, Harris county comes out on top
+* Dallas and Travis counties coming in strong as well
+* White  space in heatmap means very little accidents
+
+ 
+```{r echo=FALSE, fig.show="hold", out.width="50%", results='hide',fig.keep='all'}
+accidents_by_county <- tx_only_data %>% 
+  
+  group_by(County, Severity) %>% 
+  summarise(Accidents= n(), .groups = 'drop')  
+ 
+
+
+total_accidents_by_county <- accidents_by_county %>% 
+  group_by(County) %>% 
+  summarise(TotalAccidents = sum(Accidents)) %>% 
+  arrange(desc(TotalAccidents))
+
+top_10_counties <- head(total_accidents_by_county, 10) 
+top_10_counties
+
+ggplot(top_10_counties, aes(x = reorder(County, -TotalAccidents), y = TotalAccidents)) +
+  geom_bar(stat = "identity", fill = "steelblue") + 
+  labs(title = "Top 10 Counties by Total Accidents",
+       x = "County", 
+       y = "Total Accidents")
+
+tx_only_data_county_to_lower <- tx_only_data %>%
+                     mutate(County = tolower(County))
+
+tx_state_map <- map_data("state", region = "texas") #outline of the state of Texas
+
+accidents_by_county <- tx_only_data_county_to_lower %>% 
+  
+  group_by(County) %>% 
+  summarise(Accidents= n(), mean_long = mean(Start_Lng), mean_lat = mean(Start_Lat)) %>% 
+  arrange(desc(Accidents))
+
+
+texas_counties_map <- map_data("county", region="texas")
+
+
+merged_data <- merge(texas_counties_map, accidents_by_county, by.x = "subregion", by.y = "County")
+
+ggplot(merged_data, aes(x = long, y = lat, group = group, fill = Accidents)) +
+    geom_polygon(color = "white") +
+    geom_polygon(data = tx_state_map, aes(x = long, y = lat, group = group), 
+                 fill = NA, color = "black", linewidth = 0.5) +
+   
+    coord_fixed(0.8) +
+    scale_fill_gradient(low = "green", high = "red") +
+    labs(title = "Heat Map of Accidents by County in Texas", fill = "Number of Accidents") +
+    theme_minimal()
+
+```
+
+
+
+
+
+## Accident Severity - by county
+
+* Harris county by sheer numbers still ranks at the top of all severity levels 
+* Dallas county seems to higher a disproportionate amount of higher severity level accidents (3-4)
+
+```{r echo=FALSE, results='hide',fig.keep='all'}
+accidents_by_county_with_severity <- tx_only_data_county_to_lower %>% 
+  
+  group_by(County, Severity) %>% 
+  summarise(Accidents= n(), .groups = 'drop')
+
+total_accidents_by_county_with_severity <- accidents_by_county_with_severity %>% 
+  group_by(County) %>% 
+  summarise(TotalAccidents = sum(Accidents)) %>% 
+  arrange(desc(TotalAccidents))
+
+top_10_again <- head(total_accidents_by_county_with_severity, 10)
+
+top_10_counties_with_severity <- merge(top_10_again, accidents_by_county_with_severity, by = "County")
+top_10_counties_with_severity
+
+ggplot(top_10_counties_with_severity, aes(x = reorder(County, -Accidents), y = Accidents, fill = as.factor(Severity))) +
+  geom_bar(stat = "identity", position = position_dodge()) +
+  facet_wrap(~Severity, scales = "free_y") +
+  scale_fill_brewer(palette = "Spectral") +
+  theme_minimal() +
+  labs(title = "Total Accidents by Severity Level in Top 10 Counties",
+       x = "County",
+       y = "Number of Accidents",
+       fill = "Severity Level") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+## Accidents by City
+
+* Houston, Dallas, San  Antonio, and Fort Worth were top 5 cities with most accidents
+* Houston accounts for 97% of accidents in Harris County
+* Dallas account for 82% of accidents in Dallas County 
+* Austin accounts for 87% of  accidents in Travis County
+* El Paso accounts for 97% of accidents in El Paso County
+
+```{r echo=FALSE, fig.show="hold", out.width="50%", results='hide',fig.keep='all'}
+top_10_cities <- tx_only_data %>% 
+  group_by(City, County) %>% 
+  summarise(Accidents= n(), mean_long = mean(Start_Lng), mean_lat = mean(Start_Lat, ) ,.groups = "drop") %>% 
+  arrange(desc(Accidents)) %>% 
+  head(10)
+
+
+top_10_cities <- top_10_cities %>% 
+  filter(!is.na(mean_long) & !is.na(mean_lat) & !is.na(Accidents))
+
+combined_data <- merge(top_10_cities, top_10_counties, by = "County")
+
+combined_data <- combined_data %>% 
+  mutate(CityAccidentPercentage = (Accidents/TotalAccidents))
+
+
+ggplot(data = tx_state_map) +
+  geom_polygon(aes(x = long, y = lat, group = group), fill = "white", color = "black") +
+  geom_point(data = top_10_cities, aes(x = mean_long, y = mean_lat, size = Accidents), color = "blue", alpha = 0.5) +
+  geom_label(data = top_10_cities, aes(x = mean_long, y = mean_lat, label = City), vjust = -1, color = "blue") +
+  scale_size_continuous(range = c(1, 10)) +  # Adjust the range for size scaling as needed
+  labs(title = "Accidents by City in Texas", size = "Number of Accidents") +
+  theme_minimal() +
+  coord_fixed(1.3)
+
+ggplot(combined_data, aes(x = County, y = CityAccidentPercentage, fill = City)) +
+  geom_bar(stat = "identity", position = "dodge") +
+  xlab("County") +
+  ylab("Percentage of County Accidents") +
+  ggtitle("Percentage of Accidents by City in Top 10 Counties") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+```
+
+
+## Weather conditions and accidents
+
+* Most accidents in Texas occurred during 'fair' weather conditions
+* From top 5 weather conditions 3 out of 5  were some kind  of cloudy
+* Decided to aggregate the cloudy  weather conditions to get a better POV on the clouds effects on accidents and plot the new data frame
+
+```{r echo=FALSE, results='hide',fig.keep='all', fig.show="hold", out.width="50%", results='hide',fig.keep='all'}
+weather_accidents <- tx_only_data %>% 
+  group_by(Weather_Condition, Severity) %>% 
+  na.omit() %>% 
+  summarise(Accidents = n(), .groups = "drop") %>% 
+  arrange(desc(Accidents)) %>% 
+  head(5)
+
+
+ggplot(weather_accidents, aes(x = reorder(x = Weather_Condition, -Accidents ), y = Accidents, fill = Weather_Condition))+ 
+  geom_bar(stat = "identity") +
+  xlab("Weather Condition") + 
+  ylab("Accidents") + 
+  ggtitle("Accidents in Texas by weather condition (Types of Cloudy)")
+
+weather_accidents_fixed <- tx_only_data %>% 
+  mutate(Weather_Condition = case_when(
+    Weather_Condition %in% c("Cloudy", "Partly Cloudy", "Mostly Cloudy") ~ "Some Kind Of Cloudy", TRUE ~ Weather_Condition
+  ))
+weather_accidents_cloudy <- weather_accidents_fixed %>% 
+  group_by(Weather_Condition) %>% 
+  na.omit() %>% 
+  summarise(Accidents = n(), .groups = "drop") %>% 
+  arrange(desc(Accidents)) %>% 
+  head(5)
+weather_accidents <- tx_only_data %>% 
+  group_by(Weather_Condition, Severity) %>% 
+  na.omit() %>% 
+  summarise(Accidents = n()) %>% 
+  arrange(desc(Accidents)) %>% 
+  head(5)
+
+
+ggplot(weather_accidents_cloudy, aes(x = reorder(x = Weather_Condition, -Accidents ), y = Accidents, fill = Weather_Condition))+ 
+  geom_bar(stat = "identity") +
+  xlab("Weather Condition") + 
+  ylab("Accidents") + 
+  ggtitle("Accidents in Texas by weather condition (Some Kindof Cloudy)")
+```
+
+
+
+
+
+
+
+
+## Hour of day 
+* Extracted hour from Start_Time Column
+* Once I was able to get the total amount of accidents per hour, I then plotted this information. 
+* More accidents occur during 8am and 5pm
+* Coincides with most common hours people are commuting to and from work/school
+```{r}
+tx_only_data$Hour <- format(tx_only_data$Start_Time, "%H")
+
+hourly_accidents <- tx_only_data %>% 
+  group_by(Hour) %>% 
+  summarise(Accidents = n())
+
+ggplot(hourly_accidents, aes(x = Hour, y = Accidents)) +
+  geom_bar(stat = "identity") +
+  xlab("Hour of Day") +
+  ylab("Number of Accidents") +
+  ggtitle("Accidents Distribution by Hour of Day")
+
+```
+
+
+
+
+## Month
+
+* Were there any months that had more accidents than others?
+* Extracted the month from Start_Time 
+* November, December, and January had slightly more accidents compared to other months
+* Coincides with Holiday traveling periods
+* About 20% of accidents occur during the 'Holiday Period'
+
+
+```{r echo=FALSE, fig.show="hold", out.width="50%"}
+
+tx_only_data$Month <- format(tx_only_data$Start_Time, "%m")
+monthly_accidents <- tx_only_data %>% 
+  group_by(Month) %>% 
+  summarise(Accidents = n()) %>% 
+  arrange(desc(Accidents))
+
+ggplot(monthly_accidents, aes(x = Month, y = Accidents, fill = Month)) +
+  geom_bar(stat = "identity") +
+  
+  xlab("Month") +
+  ylab("Number of Accidents") +
+  ggtitle("Accidents Distribution by Month of the Year") +
+  scale_x_discrete(labels = c('Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'))
+
+monthly_accidents_agg <- monthly_accidents %>% 
+  mutate(Period = case_when(
+    Month %in% c(11, 12, 1) ~ "Holiday Period",
+    TRUE ~ "Other Months"
+  )) %>% 
+  group_by(Period) %>% 
+  summarise(Accidents = sum(Accidents))
+monthly_accidents_agg
+
+total_accidents_months <- sum(monthly_accidents_agg$Accidents)
+monthly_accidents_agg <- monthly_accidents_agg %>% 
+  mutate(Percentage = (Accidents/total_accidents_months) * 100)
+
+ggplot(monthly_accidents_agg, aes(x = Period, y = Percentage, fill = Period)) +
+  geom_bar(stat = "identity") +
+  ylab("Percentage of Accidents") +
+  xlab("") +
+  ggtitle("Percentage of Accidents During Holiday Period vs Other Months")
+```
+
+
+
+
+
+## Summary
+
+* Driving in Houston, Dallas, or Austin increases chances of being in an accident
+* Fair weather can be deceiving as most accidents occur during this time
+* Clouds may be pretty but increase chances of being in accident
+* Driving during the hours of 8am and 5pm increases chance of being in accident
+* Driving during the Holiday season slightly increases chanes of being in accident
+* Hopefully if projections hold true, Texas will have a decrease in accidents from previous year
+
+
+
+
+
+
